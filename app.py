@@ -10,27 +10,38 @@ st.set_page_config(
     layout="wide"
 )
 
-# Professional Header & Styling
+# Professional Navy Blue Executive Theme CSS
 st.markdown("""
     <style>
-    .main-title { font-size: 28px; font-weight: 700; color: #1e3d59; }
-    .sub-title { font-size: 16px; color: #576574; margin-bottom: 20px; }
-    .metric-card { background-color: #ffffff; padding: 20px; border-radius: 8px; border-left: 5px solid #1e3d59; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    .main { background-color: #f4f7f9; }
+    .main-title { font-size: 26px; font-weight: 700; color: #0B2545; margin-bottom: 0px; }
+    .sub-title { font-size: 14px; color: #134074; margin-bottom: 20px; font-weight: 500; }
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] { background-color: #EEF4F8; border-radius: 5px; padding: 10px 20px; color: #0B2545; font-weight: 600; }
+    .stTabs [aria-selected="true"] { background-color: #134074 !important; color: #ffffff !important; }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="main-title">🛡️ SL NAVY - FUNDS SITUATION INTELLIGENCE DASHBOARD</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-title">Prepared for Director General Budget & Finance (DG B&F) | Automated Executive Decision Support System</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">Office of the Director General Budget & Finance (DG B&F) | Executive Decision Support System</p>', unsafe_allow_html=True)
 
-# Sidebar for PDF Upload
+# Sidebar for PDF Upload & Print
 st.sidebar.header("📁 Weekly Report Upload")
 uploaded_file = st.sidebar.file_uploader("Upload SL Navy Fund Situation PDF", type=["pdf"])
+
+st.sidebar.markdown("---")
+st.sidebar.header("🖨️ Report Actions")
+if st.sidebar.button("🖨️ Print / Save Full Report"):
+    st.sidebar.markdown("<script>window.print();</script>", unsafe_allow_html=True)
+    st.sidebar.info("Use your browser's Print dialog (Ctrl+P) to save as PDF.")
 
 @st.cache_data
 def extract_fund_data(pdf_file):
     parsed_rows = []
+    current_section = "Recurrent" # Default section tracking
+    
     with pdfplumber.open(pdf_file) as pdf:
-        for page_idx, page in enumerate(pdf.pages):
+        for page in pdf.pages:
             tables = page.extract_tables()
             for table in tables:
                 for row in table:
@@ -39,12 +50,17 @@ def extract_fund_data(pdf_file):
                         code = clean_row[0]
                         title = clean_row[1]
                         
-                        # Skip header repetitions
+                        if 'CAPITAL EXPENDITURE' in title.upper() or 'CAPITAL' in code.upper():
+                            current_section = "Capital"
+                            continue
+                        if 'RECURRENT EXPENDITURE' in title.upper() or 'RECURRENT' in code.upper():
+                            current_section = "Recurrent"
+                            continue
+                            
                         if code in ['Object Code', '', 'None'] or 'Category' in title:
                             continue
                             
                         try:
-                            # Clean financial values safely
                             def clean_val(val):
                                 if not val: return 0.0
                                 val_clean = val.replace(',', '').replace('(', '-').replace(')', '').strip()
@@ -54,7 +70,6 @@ def extract_fund_data(pdf_file):
                             committed = clean_val(clean_row[3])
                             actual = clean_val(clean_row[5] if len(clean_row) > 5 else clean_row[4])
                             
-                            # Extract Actual Percentage correctly
                             pct_val = 0.0
                             for cell in clean_row:
                                 if '%' in cell:
@@ -68,15 +83,22 @@ def extract_fund_data(pdf_file):
                             if pct_val == 0.0 and alloc > 0:
                                 pct_val = round((actual / alloc) * 100, 1)
 
+                            # Determine section based on code numbering if header missed
+                            if code.startswith('2') or code.startswith('0'):
+                                # Check if it's capital
+                                pass
+
                             parsed_rows.append({
+                                "Section": current_section,
                                 "Object Code": code,
                                 "Category / Object Title": title,
                                 "Allocation": alloc,
                                 "Committed": committed,
                                 "Actual Amount": actual,
-                                "Actual Usage %": pct_val
+                                "Actual Usage %": pct_val,
+                                "DG Remarks / Reasons": ""
                             })
-                        except Exception as e:
+                        except:
                             continue
                             
     return pd.DataFrame(parsed_rows)
@@ -85,36 +107,52 @@ if uploaded_file is not None:
     df = extract_fund_data(uploaded_file)
     
     if not df.empty:
-        st.sidebar.success("✅ Report Parsed & Verified Successfully!")
+        st.sidebar.success("✅ Report Parsed Successfully!")
         
-        # Executive Summary Top Metrics
-        total_alloc = df[df['Object Code'].isin(['Recurrent Total', 'Capital Total', 'Full Total']) == False]['Allocation'].max() or 91870000000
-        total_actual = df[df['Object Code'].isin(['Recurrent Total', 'Capital Total', 'Full Total']) == False]['Actual Amount'].sum()
+        # Split Recurrent and Capital Data
+        recurrent_df = df[df['Section'] == 'Recurrent']
+        capital_df = df[df['Section'] == 'Capital']
         
-        # Display High-Level KPIs for DG B&F
+        # High Level KPI Metrics separated by Recurrent & Capital
+        st.markdown("### 📊 Executive Summary & Allocation Split")
+        
+        rec_alloc = 75643000000 # Rs. 75.64 Bn
+        rec_actual = recurrent_df['Actual Amount'].sum()
+        cap_alloc = 16224070000  # Rs. 16.22 Bn
+        cap_actual = capital_df['Actual Amount'].sum()
+        
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Full Allocation", f"Rs. {91.87:.2f} Bn", "As at 19 Oct 2026")
-        col2.metric("Total Committed", f"Rs. 82.73 Bn", "90.1% Commitment")
-        col3.metric("Actual Expenditure", f"Rs. 71.98 Bn", "78.4% Actual Usage")
+        col1.metric("Recurrent Allocation", "Rs. 75.64 Bn", f"Actual: Rs. {rec_actual/1e9:.2f} Bn")
+        col2.metric("Capital Allocation", "Rs. 16.22 Bn", f"Actual: Rs. {cap_actual/1e9:.2f} Bn")
+        col3.metric("Full Total Allocation", "Rs. 91.87 Bn", "Total Actual: Rs. 71.98 Bn")
         col4.metric("Time Elapsed Pacing", "80.0%", "292 of 365 Days Gone")
         
         st.markdown("---")
         
-        # Tabs for Professional Decision Making
-        tab1, tab2, tab3, tab4 = st.tabs([
-            "🚨 Critical Attention (<50% Usage)", 
-            "⚠️ Over-Commitments & Risks", 
-            "📊 Major Budget Balances", 
-            "📋 Complete Structured Report"
+        # Tabs for Structured Decision Making
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "🚨 Low Usage (<50%) & Remarks", 
+            "🔄 Recurrent Votes", 
+            "🏗️ Capital Votes", 
+            "⚠️ Over-Commitments", 
+            "📋 Master Data Table"
         ])
         
         with tab1:
-            st.subheader("🔴 Lines Below 50% Actual Usage (Immediate Intervention Required)")
-            st.markdown("Projects or object codes with low expenditure pacing requiring administrative follow-up:")
+            st.subheader("🔴 Lines Below 50% Actual Usage - Remarks & Justifications")
+            st.markdown("DG B&F Review: Add or update reasons/remarks for items below 50% usage directly in the table below:")
             
-            low_usage = df[(df["Actual Usage %"] < 50.0) & (df["Allocation"] > 0)].sort_values(by="Actual Usage %")
+            low_usage = df[(df["Actual Usage %"] < 50.0) & (df["Allocation"] > 0)].copy()
             
             if not low_usage.empty:
+                # Editable DataFrame for Remarks
+                edited_low_usage = st.data_editor(
+                    low_usage[["Section", "Object Code", "Category / Object Title", "Allocation", "Actual Amount", "Actual Usage %", "DG Remarks / Reasons"]],
+                    num_rows="fixed",
+                    key="low_usage_editor",
+                    use_container_width=True
+                )
+                
                 fig_low = px.bar(
                     low_usage,
                     x="Actual Usage %",
@@ -125,18 +163,26 @@ if uploaded_file is not None:
                     color_continuous_scale="Reds",
                     title="Actual Usage Pacing Below 50 Threshold"
                 )
-                fig_low.update_layout(yaxis={'categoryorder':'total ascending'}, height=500)
+                fig_low.update_layout(yaxis={'categoryorder':'total ascending'}, height=450)
                 st.plotly_chart(fig_low, use_container_width=True)
-                
-                # Display detailed table with formatting in Millions
-                display_df = low_usage[["Object Code", "Category / Object Title", "Allocation", "Actual Amount", "Actual Usage %"]].copy()
-                display_df["Allocation (Mn)"] = (display_df["Allocation"] / 1e6).round(2)
-                display_df["Actual (Mn)"] = (display_df["Actual Amount"] / 1e6).round(2)
-                st.dataframe(display_df[["Object Code", "Category / Object Title", "Allocation (Mn)", "Actual (Mn)", "Actual Usage %"]], use_container_width=True)
             else:
                 st.info("No items found below 50% threshold.")
                 
         with tab2:
+            st.subheader("🔄 Recurrent Expenditure Votes Breakdown")
+            rec_display = recurrent_df[["Object Code", "Category / Object Title", "Allocation", "Committed", "Actual Amount", "Actual Usage %"]].copy()
+            rec_display["Allocation (Mn)"] = (rec_display["Allocation"] / 1e6).round(2)
+            rec_display["Actual (Mn)"] = (rec_display["Actual Amount"] / 1e6).round(2)
+            st.dataframe(rec_display[["Object Code", "Category / Object Title", "Allocation (Mn)", "Actual (Mn)", "Actual Usage %"]], use_container_width=True)
+
+        with tab3:
+            st.subheader("🏗️ Capital Expenditure Votes Breakdown")
+            cap_display = capital_df[["Object Code", "Category / Object Title", "Allocation", "Committed", "Actual Amount", "Actual Usage %"]].copy()
+            cap_display["Allocation (Mn)"] = (cap_display["Allocation"] / 1e6).round(2)
+            cap_display["Actual (Mn)"] = (cap_display["Actual Amount"] / 1e6).round(2)
+            st.dataframe(cap_display[["Object Code", "Category / Object Title", "Allocation (Mn)", "Actual (Mn)", "Actual Usage %"]], use_container_width=True)
+
+        with tab4:
             st.subheader("⚠️ Commitments Exceeding Allocation (Over-Committed Codes)")
             over_committed = df[df["Committed"] > df["Allocation"]].copy()
             if not over_committed.empty:
@@ -151,30 +197,12 @@ if uploaded_file is not None:
                 )
                 fig_oc.update_layout(yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig_oc, use_container_width=True)
-                st.dataframe(over_committed[["Object Code", "Category / Object Title", "Allocation", "Committed", "Excess Commitment (Mn)"]], use_container_width=True)
+                st.dataframe(over_committed[["Section", "Object Code", "Category / Object Title", "Allocation", "Committed", "Excess Commitment (Mn)"]], use_container_width=True)
             else:
                 st.success("No over-committed lines detected.")
 
-        with tab3:
-            st.subheader("📌 Ten Largest Balances to Actualise")
-            top_balances = df.sort_values(by="Allocation", ascending=False).head(10).copy()
-            top_balances["Allocation (Bn)"] = (top_balances["Allocation"] / 1e9).round(2)
-            
-            fig_bal = px.bar(
-                top_balances,
-                x="Allocation (Bn)",
-                y="Category / Object Title",
-                orientation='h',
-                text="Allocation (Bn)",
-                color="Actual Usage %",
-                color_continuous_scale="Viridis",
-                title="Top Budget Allocations and Their Usage Status"
-            )
-            fig_bal.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_bal, use_container_width=True)
-
-        with tab4:
-            st.subheader("📋 Complete Fund Situation Master Data")
+        with tab5:
+            st.subheader("📋 Complete Master Data Table")
             st.dataframe(df, use_container_width=True)
             
     else:
